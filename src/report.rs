@@ -7,6 +7,7 @@ use std::time::Duration;
 
 pub mod csv;
 pub mod dot;
+pub mod event;
 pub mod flows;
 pub mod json;
 pub mod silent;
