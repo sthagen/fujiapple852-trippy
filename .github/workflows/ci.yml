@@ -55,7 +55,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        build: [ netbsd, freebsd ]
+        build: [ netbsd, freebsd, openbsd ]
         include:
           - build: netbsd
             os: ubuntu-22.04
@@ -64,6 +64,10 @@ jobs:
           - build: freebsd
             os: ubuntu-22.04
             target: x86_64-unknown-freebsd
+            rust: stable
+          - build: openbsd
+            os: ubuntu-22.04
+            target: x86_64-unknown-openbsd
             rust: stable
     steps:
       - uses: actions/checkout@v4
