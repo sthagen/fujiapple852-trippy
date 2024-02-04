@@ -82,7 +82,8 @@ Options:
           The maximum duration of every round [default: 1s]
 
   -g, --grace-duration <GRACE_DURATION>
-          The period of time to wait for additional ICMP responses after the target has responded [default: 100ms]
+          The period of time to wait for additional ICMP responses after the target has responded
+          [default: 100ms]
 
       --initial-sequence <INITIAL_SEQUENCE>
           The initial sequence number [default: 33000]
