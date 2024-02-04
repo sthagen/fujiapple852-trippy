@@ -1,3 +1,7 @@
+---
+source: src/config.rs
+expression: s
+---
 A network diagnostic tool
 
 Usage: trip [OPTIONS] [TARGETS]...
@@ -245,3 +249,4 @@ Options:
 
   -V, --version
           Print version
+
