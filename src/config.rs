@@ -1125,6 +1125,7 @@ mod tests {
     #[test_case("trip -h", "usage_short"; "show short help")]
     #[test_case("trip --help", "usage_long"; "show long help")]
     fn test_help(cmd: &str, snapshot_name: &str) {
+        crate::tests::set_terminal_width(); // Ensure terminal width is always the same for this test (output changes with width)
         compare_with_snapshot(snapshot_name, parse_config(cmd));
     }
 

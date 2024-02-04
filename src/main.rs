@@ -462,10 +462,48 @@ mod tests {
     use super::*;
     use test_case::test_case;
 
+    const CI_TERMINAL_WIDTH: u16 = 100;
+    const MAX_WAIT_TIME_FOR_TERMINAL_WIDTH_IN_SEC: u64 = 2;
+
     pub(crate) fn insta_settings() -> insta::Settings {
         let mut result = insta::Settings::clone_current();
         result.set_snapshot_path("../tests/snapshots");
         result
+    }
+    /// Designed for use in testing and will panic if unable to set size in under 2 seconds
+    pub(crate) fn set_terminal_width() {
+        let (mut curr_width, mut curr_height) = crossterm::terminal::size().unwrap();
+        println!("Current terminal size is {curr_width} x {curr_height}");
+        if curr_width == CI_TERMINAL_WIDTH {
+            // Nothing required to be done
+            println!("Already at desired width of {CI_TERMINAL_WIDTH}");
+            return;
+        }
+
+        let start_instant = std::time::Instant::now();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::SetSize(CI_TERMINAL_WIDTH, curr_height)
+        )
+        .unwrap();
+        while curr_width != CI_TERMINAL_WIDTH {
+            if std::time::Instant::now()
+                .duration_since(start_instant)
+                .as_secs()
+                > MAX_WAIT_TIME_FOR_TERMINAL_WIDTH_IN_SEC
+            {
+                panic!("failed to change terminal size to width of {CI_TERMINAL_WIDTH} in under {MAX_WAIT_TIME_FOR_TERMINAL_WIDTH_IN_SEC} seconds");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            (curr_width, curr_height) = crossterm::terminal::size().unwrap();
+        }
+
+        println!(
+            "Successfully changed terminal size to {curr_width} x {curr_height} in {} mills",
+            std::time::Instant::now()
+                .duration_since(start_instant)
+                .as_millis()
+        );
     }
 
     #[test_case("tui_theme_items", &tui_theme_items(); "tui theme items match")]
@@ -476,6 +514,7 @@ mod tests {
     #[test_case("completions_powershell", &shell_completions(Shell::PowerShell).unwrap(); "generate powershell shell completions")]
     #[test_case("completions_zsh", &shell_completions(Shell::Zsh).unwrap(); "generate zsh shell completions")]
     fn test_output(snapshot_name: &str, actual: &str) {
+        set_terminal_width(); // TODO Onè: Consider putting actual into a closure to run it after this line instead of before
         insta_settings().bind(|| insta::assert_snapshot!(snapshot_name, actual));
     }
 }
