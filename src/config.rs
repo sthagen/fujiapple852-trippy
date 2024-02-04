@@ -1654,7 +1654,7 @@ mod tests {
             Ok(cfg) => format!("{cfg:?}"),
             Err(err) => err.to_string(),
         };
-        insta::assert_snapshot!(snapshot_name, s);
+        crate::tests::insta_settings().bind(|| insta::assert_snapshot!(snapshot_name, s));
     }
 
     fn cfg() -> TrippyConfigBuilder {

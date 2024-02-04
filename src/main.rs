@@ -462,6 +462,12 @@ mod tests {
     use super::*;
     use test_case::test_case;
 
+    pub(crate) fn insta_settings() -> insta::Settings {
+        let mut result = insta::Settings::clone_current();
+        result.set_snapshot_path("../tests/snapshots");
+        result
+    }
+
     #[test_case("tui_theme_items", &tui_theme_items(); "tui theme items match")]
     #[test_case("tui_binding_commands", &tui_binding_commands(); "tui binding commands match")]
     #[test_case("completions_bash", &shell_completions(Shell::Bash).unwrap(); "generate bash shell completions")]
@@ -470,6 +476,6 @@ mod tests {
     #[test_case("completions_powershell", &shell_completions(Shell::PowerShell).unwrap(); "generate powershell shell completions")]
     #[test_case("completions_zsh", &shell_completions(Shell::Zsh).unwrap(); "generate zsh shell completions")]
     fn test_output(snapshot_name: &str, actual: &str) {
-        insta::assert_snapshot!(snapshot_name, actual);
+        insta_settings().bind(|| insta::assert_snapshot!(snapshot_name, actual));
     }
 }
