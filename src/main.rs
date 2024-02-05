@@ -472,6 +472,10 @@ mod tests {
     }
     /// Designed for use in testing and will panic if unable to set size in under 2 seconds
     pub(crate) fn set_terminal_width() {
+        if Ok("true".into()) == std::env::var("CI") {
+            println!("Running in CI should already match and we cannot set it");
+            return;
+        }
         let (mut curr_width, mut curr_height) = crossterm::terminal::size().unwrap();
         println!("Current terminal size is {curr_width} x {curr_height}");
         if curr_width == CI_TERMINAL_WIDTH {
