@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, rust_2018_idioms)]
 #![allow(
     clippy::module_name_repetitions,
+    clippy::redundant_field_names,
     clippy::struct_field_names,
     clippy::option_if_let_else,
     clippy::missing_const_for_fn,
@@ -15,27 +16,30 @@
 #![deny(unsafe_code)]
 
 use crate::backend::Backend;
-use crate::config::{LogFormat, LogSpanEvents, Mode, TrippyConfig};
+use crate::config::{
+    LogFormat, LogSpanEvents, Mode, TrippyAction, TrippyConfig, TuiCommandItem, TuiThemeItem,
+};
 use crate::geoip::GeoIpLookup;
 use crate::platform::Platform;
 use anyhow::{anyhow, Error};
 use backend::trace::Trace;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use config::Args;
 use frontend::TuiConfig;
 use parking_lot::RwLock;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+use std::{process, thread};
+use strum::VariantNames;
 use tracing_chrome::{ChromeLayerBuilder, FlushGuard};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trippy::dns::{DnsResolver, Resolver};
 use trippy::tracing::{
-    AddrFamily, ChannelConfig, Config, IcmpExtensionParseMode, MultipathStrategy, PortDirection,
-    Protocol,
+    ChannelConfig, Config, IcmpExtensionParseMode, MultipathStrategy, PortDirection, Protocol,
 };
 use trippy::tracing::{PrivilegeMode, SourceAddr};
 
@@ -50,36 +54,60 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     Platform::acquire_privileges()?;
     let platform = Platform::discover()?;
-    let cfg = TrippyConfig::from(args, &platform)?;
-    let _guard = configure_logging(&cfg);
-    let resolver = start_dns_resolver(&cfg)?;
-    let geoip_lookup = create_geoip_lookup(&cfg)?;
-    let addrs = resolve_targets(&cfg, &resolver)?;
+    match TrippyAction::from(args, &platform)? {
+        TrippyAction::Trippy(cfg) => run_trippy(&cfg, &platform)?,
+        TrippyAction::PrintTuiThemeItems => print_tui_theme_items(),
+        TrippyAction::PrintTuiBindingCommands => print_tui_binding_commands(),
+        TrippyAction::PrintConfigTemplate => print_config_template(),
+        TrippyAction::PrintShellCompletions(shell) => print_shell_completions(shell)?,
+    }
+    Ok(())
+}
+
+fn run_trippy(cfg: &TrippyConfig, platform: &Platform) -> anyhow::Result<()> {
+    let _guard = configure_logging(cfg);
+    let resolver = start_dns_resolver(cfg)?;
+    let geoip_lookup = create_geoip_lookup(cfg)?;
+    let addrs = resolve_targets(cfg, &resolver)?;
     if addrs.is_empty() {
         return Err(anyhow!(
-            "failed to find any valid IP{} addresses for {}",
+            "failed to find any valid IP addresses for {} for address family {}",
+            cfg.targets.join(", "),
             cfg.addr_family,
-            cfg.targets.join(", ")
         ));
     }
-    let traces = start_tracers(&cfg, &addrs, platform.pid)?;
+    let traces = start_tracers(cfg, &addrs, platform.pid)?;
     Platform::drop_privileges()?;
-    run_frontend(&cfg, resolver, geoip_lookup, traces)?;
-    Ok(())
+    run_frontend(cfg, resolver, geoip_lookup, traces)
+}
+
+fn print_tui_theme_items() {
+    println!("{}", tui_theme_items());
+    process::exit(0);
+}
+
+fn print_tui_binding_commands() {
+    println!("{}", tui_binding_commands());
+    process::exit(0);
+}
+
+fn print_config_template() {
+    println!("{}", include_str!("../trippy-config-sample.toml"));
+    process::exit(0);
+}
+
+fn print_shell_completions(shell: Shell) -> anyhow::Result<()> {
+    println!("{}", shell_completions(shell)?);
+    process::exit(0);
 }
 
 /// Start the DNS resolver.
 fn start_dns_resolver(cfg: &TrippyConfig) -> anyhow::Result<DnsResolver> {
-    Ok(match cfg.addr_family {
-        AddrFamily::Ipv4 => DnsResolver::start(trippy::dns::Config::new_ipv4(
-            cfg.dns_resolve_method,
-            cfg.dns_timeout,
-        ))?,
-        AddrFamily::Ipv6 => DnsResolver::start(trippy::dns::Config::new_ipv6(
-            cfg.dns_resolve_method,
-            cfg.dns_timeout,
-        ))?,
-    })
+    Ok(DnsResolver::start(trippy::dns::Config::new(
+        cfg.dns_resolve_method,
+        cfg.addr_family,
+        cfg.dns_timeout,
+    ))?)
 }
 
 fn create_geoip_lookup(cfg: &TrippyConfig) -> anyhow::Result<GeoIpLookup> {
@@ -282,7 +310,6 @@ fn make_trace_info(
         args.multipath_strategy,
         args.port_direction,
         args.protocol,
-        args.addr_family,
         args.first_ttl,
         args.max_ttl,
         args.grace_duration,
@@ -338,7 +365,6 @@ pub struct TraceInfo {
     pub multipath_strategy: MultipathStrategy,
     pub port_direction: PortDirection,
     pub protocol: Protocol,
-    pub addr_family: AddrFamily,
     pub first_ttl: u8,
     pub max_ttl: u8,
     pub grace_duration: Duration,
@@ -367,7 +393,6 @@ impl TraceInfo {
         multipath_strategy: MultipathStrategy,
         port_direction: PortDirection,
         protocol: Protocol,
-        addr_family: AddrFamily,
         first_ttl: u8,
         max_ttl: u8,
         grace_duration: Duration,
@@ -392,7 +417,6 @@ impl TraceInfo {
             multipath_strategy,
             port_direction,
             protocol,
-            addr_family,
             first_ttl,
             max_ttl,
             grace_duration,
@@ -408,5 +432,51 @@ impl TraceInfo {
             geoip_mmdb_file,
             dns_resolve_all,
         }
+    }
+}
+
+fn tui_theme_items() -> String {
+    format!(
+        "TUI theme color items: {}",
+        TuiThemeItem::VARIANTS.join(", ")
+    )
+}
+
+fn tui_binding_commands() -> String {
+    format!(
+        "TUI binding commands: {}",
+        TuiCommandItem::VARIANTS.join(", ")
+    )
+}
+
+fn shell_completions(shell: Shell) -> anyhow::Result<String> {
+    let mut cmd = Args::command();
+    let name = cmd.get_name().to_string();
+    let mut buffer: Vec<u8> = vec![];
+    clap_complete::generate(shell, &mut cmd, name, &mut buffer);
+    Ok(String::from_utf8(buffer)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(include_str!("../test_resources/tui_theme_items.txt"), &tui_theme_items(); "tui theme items match")]
+    #[test_case(include_str!("../test_resources/tui_binding_commands.txt"), &tui_binding_commands(); "tui binding commands match")]
+    #[test_case(include_str!("../test_resources/completions_bash.txt"), &shell_completions(Shell::Bash).unwrap(); "generate bash shell completions")]
+    #[test_case(include_str!("../test_resources/completions_elvish.txt"), &shell_completions(Shell::Elvish).unwrap(); "generate elvish shell completions")]
+    #[test_case(include_str!("../test_resources/completions_fish.txt"), &shell_completions(Shell::Fish).unwrap(); "generate fish shell completions")]
+    #[test_case(include_str!("../test_resources/completions_powershell.txt"), &shell_completions(Shell::PowerShell).unwrap(); "generate powershell shell completions")]
+    #[test_case(include_str!("../test_resources/completions_zsh.txt"), &shell_completions(Shell::Zsh).unwrap(); "generate zsh shell completions")]
+    fn test_output(expected: &str, actual: &str) {
+        if remove_whitespace(actual.to_string()) != remove_whitespace(expected.to_string()) {
+            pretty_assertions::assert_eq!(actual, expected);
+        }
+    }
+
+    fn remove_whitespace(mut s: String) -> String {
+        s.retain(|c| !c.is_whitespace());
+        s
     }
 }

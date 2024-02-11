@@ -78,9 +78,11 @@ protocol = "icmp"
 # The address family.
 #
 # Allowed values are:
-#   ipv4 [default]
-#   ipv6
-addr-family = "ipv4"
+#   ipv4            - Lookup Ipv4 only
+#   ipv6            - Lookup Ipv6 only
+#   ipv6-then-ipv4  - Lookup Ipv6 with a fallback to Ipv4
+#   ipv4-then-ipv6  - Lookup Ipv4 with a fallback to Ipv6 [default]
+addr-family = "ipv4-then-ipv6"
 
 # The target port (TCP & UDP only) [default: 80]
 #
@@ -242,22 +244,32 @@ tui-as-mode = "asn"
 
 # Custom columns to be displayed in the TUI hops table.
 #
-# Allowed values are:
+# Default values:
 #
-#   H - Ttl
-#   O - Hostname
-#   L - Loss %
-#   S - Probes sent
-#   R - Responses received
-#   A - Last RTT
-#   V - Average RTT
-#   B - Best RTT
-#   W - Worst RTT
-#   D - Stddev
-#   T - Status
+#   h - Ttl
+#   o - Hostname
+#   l - Loss %
+#   s - Probes sent
+#   r - Responses received
+#   a - Last RTT
+#   v - Average RTT
+#   b - Best RTT
+#   w - Worst RTT
+#   d - Stddev
+#   t - Status
+#
+# Also avilable:
+#
+#   j - Jitter
+#   g - Jitter average
+#   x - Jitter max
+#   i - Jitter intra
+#   Q - Last probe sequence number
+#   S - Last probe source port
+#   P - Last probe destination port
 #
 # The columns will be shown in the order specified.
-tui-custom-columns = "HOLSRAVBWDT"
+tui-custom-columns = "holsravbwdt"
 
 # How to render ICMP extensions.
 #
@@ -267,6 +279,14 @@ tui-custom-columns = "HOLSRAVBWDT"
 #   all             - Show full icmp extension data for all classes
 tui-icmp-extension-mode = "off"
 
+# The mmdb file to use GeoIp lookup [default: none]
+#
+# Supported mmdb formats:
+#   MaxMind "GeoLite2 City"
+#   IPinfo "IP to Country + ASN Database"
+#   IPinfo "IP to Geolocation Extended Database"
+#geoip-mmdb-file = "/path/to/geoip_file.mmdb"
+
 # How to render GeoIp information.
 #
 # Allowed values are:
@@ -274,6 +294,8 @@ tui-icmp-extension-mode = "off"
 #   short - Show short format GeoIp information
 #   long - Show long format GeoIp information
 #   location - Show latitude and Longitude format GeoIp information
+#
+# Note this value is ignored unless a valid geoip-mmdb-file value is also provided.
 tui-geoip-mode = "off"
 
 # The maximum number of addresses to show per hop [default: auto]
@@ -295,6 +317,7 @@ tui-refresh-rate = "100ms"
 
 # The maximum ttl of hops which will be masked for privacy [default: 1]
 tui-privacy-max-ttl = 0
+
 
 # Tui color theme configure.
 #
@@ -338,6 +361,7 @@ map-selected-color = "green"
 map-info-panel-border-color = "gray"
 map-info-panel-bg-color = "black"
 map-info-panel-text-color = "gray"
+
 
 # Tui key bindings Configuration.
 #

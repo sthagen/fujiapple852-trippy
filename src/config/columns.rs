@@ -71,13 +71,27 @@ pub enum TuiColumn {
     StdDev,
     /// The status of a hop.
     Status,
+    /// The current jitter i.e. round-trip difference with the last round-trip.
+    Jitter,
+    /// The average jitter time for all probes at this hop.
+    Javg,
+    /// The worst round-trip jitter time for all probes at this hop.
+    Jmax,
+    /// The smoothed jitter value for all probes at this hop.
+    Jinta,
+    /// The source port for last probe for this hop.
+    LastSrcPort,
+    /// The destination port for last probe for this hop.
+    LastDestPort,
+    /// The sequence number for the last probe for this hop.
+    LastSeq,
 }
 
 impl TryFrom<char> for TuiColumn {
     type Error = anyhow::Error;
 
     fn try_from(value: char) -> Result<Self, Self::Error> {
-        match value.to_ascii_lowercase() {
+        match value {
             'h' => Ok(Self::Ttl),
             'o' => Ok(Self::Host),
             'l' => Ok(Self::LossPct),
@@ -89,6 +103,13 @@ impl TryFrom<char> for TuiColumn {
             'w' => Ok(Self::Worst),
             'd' => Ok(Self::StdDev),
             't' => Ok(Self::Status),
+            'j' => Ok(Self::Jitter),
+            'g' => Ok(Self::Javg),
+            'x' => Ok(Self::Jmax),
+            'i' => Ok(Self::Jinta),
+            'S' => Ok(Self::LastSrcPort),
+            'P' => Ok(Self::LastDestPort),
+            'Q' => Ok(Self::LastSeq),
             c => Err(anyhow!(format!("unknown column code: {c}"))),
         }
     }
@@ -108,6 +129,13 @@ impl Display for TuiColumn {
             Self::Worst => write!(f, "w"),
             Self::StdDev => write!(f, "d"),
             Self::Status => write!(f, "t"),
+            Self::Jitter => write!(f, "j"),
+            Self::Javg => write!(f, "g"),
+            Self::Jmax => write!(f, "x"),
+            Self::Jinta => write!(f, "i"),
+            Self::LastSrcPort => write!(f, "S"),
+            Self::LastDestPort => write!(f, "P"),
+            Self::LastSeq => write!(f, "Q"),
         }
     }
 }
@@ -134,7 +162,7 @@ mod tests {
     }
 
     ///Negative test for invalid characters
-    #[test_case('x' ; "invalid x")]
+    #[test_case('k' ; "invalid k")]
     #[test_case('z' ; "invalid z")]
     fn test_try_invalid_char_for_tui_column(c: char) {
         // Negative test for an unknown character

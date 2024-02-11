@@ -3,9 +3,9 @@ use crate::config::MAX_HOPS;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::iter::once;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::time::Duration;
-use trippy::tracing::{Extensions, Probe, ProbeStatus, TracerRound};
+use trippy::tracing::{Extensions, ProbeState, Round, TimeToLive, TracerRound};
 
 /// The state of all hops in a trace.
 #[derive(Debug, Clone)]
@@ -98,11 +98,12 @@ impl Trace {
             round
                 .probes
                 .iter()
-                .filter(|probe| {
-                    matches!(probe.status, ProbeStatus::Complete | ProbeStatus::Awaited)
+                .filter_map(|probe| match probe {
+                    ProbeState::Awaited(_) => Some(None),
+                    ProbeState::Complete(completed) => Some(Some(completed.host)),
+                    _ => None,
                 })
-                .take(usize::from(round.largest_ttl.0))
-                .map(|p| p.host),
+                .take(usize::from(round.largest_ttl.0)),
         );
         let flow_id = self.registry.register(flow);
         self.round_flow_id = flow_id;
@@ -138,6 +139,20 @@ pub struct Hop {
     best: Option<Duration>,
     /// The worst round trip time for this hop across all rounds.
     worst: Option<Duration>,
+    /// The current jitter i.e. round-trip difference with the last round-trip.
+    jitter: Option<Duration>,
+    /// The average jitter time for all probes at this hop.
+    javg: f64,
+    /// The worst round-trip jitter time for all probes at this hop.
+    jmax: Option<Duration>,
+    /// The smoothed jitter value for all probes at this hop.
+    jinta: f64,
+    /// The source port for last probe for this hop.
+    last_src_port: u16,
+    /// The destination port for last probe for this hop.
+    last_dest_port: u16,
+    /// The sequence number for the last probe for this hop.
+    last_sequence: u16,
     /// The history of round trip times across the last N rounds.
     samples: Vec<Duration>,
     /// The ICMP extensions for this hop.
@@ -219,6 +234,41 @@ impl Hop {
         }
     }
 
+    /// The duration of the jitter probe observed.
+    pub fn jitter_ms(&self) -> Option<f64> {
+        self.jitter.map(|j| j.as_secs_f64() * 1000_f64)
+    }
+
+    /// The duration of the jworst probe observed.
+    pub fn jmax_ms(&self) -> Option<f64> {
+        self.jmax.map(|x| x.as_secs_f64() * 1000_f64)
+    }
+
+    /// The jitter average duration of all probes.
+    pub fn javg_ms(&self) -> f64 {
+        self.javg
+    }
+
+    /// The jitter interval of all probes.
+    pub fn jinta(&self) -> f64 {
+        self.jinta
+    }
+
+    /// The source port for last probe for this hop.
+    pub fn last_src_port(&self) -> u16 {
+        self.last_src_port
+    }
+
+    /// The destination port for last probe for this hop.
+    pub fn last_dest_port(&self) -> u16 {
+        self.last_dest_port
+    }
+
+    /// The sequence number for the last probe for this hop.
+    pub fn last_sequence(&self) -> u16 {
+        self.last_sequence
+    }
+
     /// The last N samples.
     pub fn samples(&self) -> &[Duration] {
         &self.samples
@@ -240,6 +290,13 @@ impl Default for Hop {
             last: None,
             best: None,
             worst: None,
+            jitter: None,
+            javg: 0f64,
+            jmax: None,
+            jinta: 0f64,
+            last_src_port: 0_u16,
+            last_dest_port: 0_u16,
+            last_sequence: 0_u16,
             mean: 0f64,
             m2: 0f64,
             samples: Vec::default(),
@@ -323,19 +380,33 @@ impl TraceData {
         }
     }
 
-    fn update_from_probe(&mut self, probe: &Probe) {
-        self.update_lowest_ttl(probe);
-        self.update_round(probe);
-        match probe.status {
-            ProbeStatus::Complete => {
-                let index = usize::from(probe.ttl.0) - 1;
+    fn update_from_probe(&mut self, probe: &ProbeState) {
+        match probe {
+            ProbeState::Complete(complete) => {
+                self.update_lowest_ttl(complete.ttl);
+                self.update_round(complete.round);
+                let index = usize::from(complete.ttl.0) - 1;
                 let hop = &mut self.hops[index];
-                hop.ttl = probe.ttl.0;
+                hop.ttl = complete.ttl.0;
                 hop.total_sent += 1;
                 hop.total_recv += 1;
-                let dur = probe.duration();
+                let dur = complete
+                    .received
+                    .duration_since(complete.sent)
+                    .unwrap_or_default();
                 let dur_ms = dur.as_secs_f64() * 1000_f64;
                 hop.total_time += dur;
+                // Before last is set use it to calc jitter
+                let last_ms = hop.last_ms().unwrap_or_default();
+                let jitter_ms = (last_ms - dur_ms).abs();
+                let jitter_dur = Duration::from_secs_f64(jitter_ms / 1000_f64);
+                hop.jitter = hop.last.and(Some(jitter_dur));
+                hop.javg += (jitter_ms - hop.javg) / hop.total_recv as f64;
+                // algorithm is from rfc1889, A.8 or rfc3550
+                hop.jinta += jitter_ms - ((hop.jinta + 8.0) / 16.0);
+                hop.jmax = hop
+                    .jmax
+                    .map_or(Some(jitter_dur), |d| Some(d.max(jitter_dur)));
                 hop.last = Some(dur);
                 hop.samples.insert(0, dur);
                 hop.best = hop.best.map_or(Some(dur), |d| Some(d.min(dur)));
@@ -345,39 +416,43 @@ impl TraceData {
                 if hop.samples.len() > self.max_samples {
                     hop.samples.pop();
                 }
-                let host = probe.host.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+                let host = complete.host;
                 *hop.addrs.entry(host).or_default() += 1;
-                hop.extensions = probe.extensions.clone();
+                hop.extensions = complete.extensions.clone();
+                hop.last_src_port = complete.src_port.0;
+                hop.last_dest_port = complete.dest_port.0;
+                hop.last_sequence = complete.sequence.0;
             }
-            ProbeStatus::Awaited => {
-                let index = usize::from(probe.ttl.0) - 1;
+            ProbeState::Awaited(awaited) => {
+                self.update_lowest_ttl(awaited.ttl);
+                self.update_round(awaited.round);
+                let index = usize::from(awaited.ttl.0) - 1;
                 self.hops[index].total_sent += 1;
-                self.hops[index].ttl = probe.ttl.0;
+                self.hops[index].ttl = awaited.ttl.0;
                 self.hops[index].samples.insert(0, Duration::default());
                 if self.hops[index].samples.len() > self.max_samples {
                     self.hops[index].samples.pop();
                 }
+                self.hops[index].last_src_port = awaited.src_port.0;
+                self.hops[index].last_dest_port = awaited.dest_port.0;
+                self.hops[index].last_sequence = awaited.sequence.0;
             }
-            ProbeStatus::NotSent | ProbeStatus::Skipped => {}
+            ProbeState::NotSent | ProbeState::Skipped => {}
         }
     }
 
-    fn update_round(&mut self, probe: &Probe) {
-        if matches!(probe.status, ProbeStatus::Awaited | ProbeStatus::Complete) {
-            self.round = match self.round {
-                None => Some(probe.round.0),
-                Some(r) => Some(r.max(probe.round.0)),
-            }
+    fn update_round(&mut self, round: Round) {
+        self.round = match self.round {
+            None => Some(round.0),
+            Some(r) => Some(r.max(round.0)),
         }
     }
 
-    fn update_lowest_ttl(&mut self, probe: &Probe) {
-        if matches!(probe.status, ProbeStatus::Awaited | ProbeStatus::Complete) {
-            if self.lowest_ttl == 0 {
-                self.lowest_ttl = probe.ttl.0;
-            } else {
-                self.lowest_ttl = self.lowest_ttl.min(probe.ttl.0);
-            }
+    fn update_lowest_ttl(&mut self, ttl: TimeToLive) {
+        if self.lowest_ttl == 0 {
+            self.lowest_ttl = ttl.0;
+        } else {
+            self.lowest_ttl = self.lowest_ttl.min(ttl.0);
         }
     }
 }

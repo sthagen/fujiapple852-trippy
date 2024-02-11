@@ -11,6 +11,7 @@ categories = ["command-line-utilities", "network-programming"]
 readme = "README.md"
 license = "Apache-2.0"
 edition = "2021"
+rust-version = "1.70"
 exclude = ["assets/legacy", "assets/*/*.png"]
 
 [[bin]]
@@ -32,27 +33,28 @@ anyhow = "1.0.79"
 dns-lookup = "2.0.4"
 hickory-resolver = "0.24.0"
 crossbeam = "0.8.4"
-clap = { version = "4.4.0",  default-features = false, features = [ "cargo", "derive", "wrap_help", "usage", "unstable-styles" ] }
-clap_complete = "4.4.6"
+clap = { version = "~4.4.0",  default-features = false, features = [ "cargo", "derive", "wrap_help", "usage", "unstable-styles" ] }
+clap_complete = "~4.4.9"
 humantime = "2.1.0"
 parking_lot = "0.12.1"
-ratatui = "0.25.0"
+ratatui = "0.26.0"
 crossterm = { version = "0.27.0",  default-features = false, features = [ "events", "windows" ] }
-chrono = { version = "0.4.31", default-features = false, features = [ "clock" ] }
-itertools = "0.12.0"
-serde = { version = "1.0.194", default-features = false }
-serde_json = { version = "1.0.111", default-features = false }
+chrono = { version = "0.4.33", default-features = false, features = [ "clock" ] }
+itertools = "0.12.1"
+serde = { version = "1.0.196", default-features = false }
+serde_json = { version = "1.0.113", default-features = false }
 comfy-table = { version = "7.1.0", default-features = false }
-strum = { version = "0.25.0", default-features = false, features = [ "std", "derive" ] }
+strum = { version = "0.26.1", default-features = false, features = [ "std", "derive" ] }
 etcetera = "0.8.0"
-toml = { version = "0.8.8", default-features = false, features = [ "parse" ] }
-indexmap = { version = "2.1.0", default-features = false }
+toml = { version = "0.8.10", default-features = false, features = [ "parse" ] }
+indexmap = { version = "2.2.2", default-features = false }
 maxminddb = "0.24.0"
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [ "json", "env-filter" ] }
 tracing-chrome = "0.7.1"
 petgraph = "0.6.4"
 csv = "1.3.0"
-serde_with = "3.4.0"
+serde_with = "3.6.1"
+encoding_rs_io = "0.1.7"
 
 # Library dependencies (Linux)
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -82,14 +84,15 @@ hex-literal = "0.4.1"
 pretty_assertions = "1.4.0"
 rand = "0.8.5"
 test-case = "3.3.1"
-serde_yaml = "0.9.30"
-tokio = { version = "1.35.1", features = [ "full" ] }
+serde_yaml = "0.9.31"
+tokio = { version = "1.36.0", features = [ "full" ] }
 tokio-util = "0.7.10"
 ipnetwork = "0.20.0"
+mockall = "0.12.1"
 
 # see https://github.com/meh/rust-tun/pull/74
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dev-dependencies]
-tun = { git = "https://github.com/fujiapple852/rust-tun", rev = "e944758112d23a2199b0c8d8adf8ffc6a8c1e9f5", features = [ "async" ] }
+tun2 = { version = "1.0.4", features = [ "async" ] }
 
 [features]
 # Enable simulation integration tests

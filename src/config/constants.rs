@@ -1,6 +1,6 @@
 use crate::config::{
-    AddressMode, AsMode, DnsResolveMethodConfig, GeoIpMode, IcmpExtensionMode, LogFormat,
-    LogSpanEvents, Mode,
+    AddressFamilyConfig, AddressMode, AsMode, DnsResolveMethodConfig, GeoIpMode, IcmpExtensionMode,
+    LogFormat, LogSpanEvents, Mode,
 };
 use std::time::Duration;
 
@@ -38,7 +38,7 @@ pub const DEFAULT_TUI_PRESERVE_SCREEN: bool = false;
 pub const DEFAULT_TUI_AS_MODE: AsMode = AsMode::Asn;
 
 /// The default value for `tui-custom-columns`.
-pub const DEFAULT_CUSTOM_COLUMNS: &str = "HOLSRAVBWDT";
+pub const DEFAULT_CUSTOM_COLUMNS: &str = "holsravbwdt";
 
 /// The default value for `tui-icmp-extension-mode`.
 pub const DEFAULT_TUI_ICMP_EXTENSION_MODE: IcmpExtensionMode = IcmpExtensionMode::Off;
@@ -60,6 +60,9 @@ pub const DEFAULT_TUI_PRIVACY_MAX_TTL: u8 = 0;
 
 /// The default value for `dns-resolve-method`.
 pub const DEFAULT_DNS_RESOLVE_METHOD: DnsResolveMethodConfig = DnsResolveMethodConfig::System;
+
+/// The default value for `addr-family`.
+pub const DEFAULT_ADDR_FAMILY: AddressFamilyConfig = AddressFamilyConfig::Ipv4ThenIpv6;
 
 /// The default value for `dns-lookup-as-info`.
 pub const DEFAULT_DNS_LOOKUP_AS_INFO: bool = false;
@@ -88,8 +91,11 @@ pub const MIN_GRACE_DURATION_MS: Duration = Duration::from_millis(10);
 /// The maximum grace duration.
 pub const MAX_GRACE_DURATION_MS: Duration = Duration::from_millis(1000);
 
-/// The minimum packet size we allow.
-pub const MIN_PACKET_SIZE: u16 = 28;
+/// The minimum IPv4 packet size we allow.
+pub const MIN_PACKET_SIZE_IPV4: u16 = 28;
+
+/// The minimum IPv6 packet size we allow.
+pub const MIN_PACKET_SIZE_IPV6: u16 = 48;
 
 /// The maximum packet size we allow.
 pub const MAX_PACKET_SIZE: u16 = 1024;

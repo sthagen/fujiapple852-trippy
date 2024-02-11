@@ -9,17 +9,17 @@ use crate::tracing::packet::icmpv6::destination_unreachable::DestinationUnreacha
 use crate::tracing::packet::icmpv6::echo_reply::EchoReplyPacket;
 use crate::tracing::packet::icmpv6::echo_request::EchoRequestPacket;
 use crate::tracing::packet::icmpv6::time_exceeded::TimeExceededPacket;
-use crate::tracing::packet::icmpv6::{IcmpCode, IcmpPacket, IcmpType};
+use crate::tracing::packet::icmpv6::{IcmpCode, IcmpPacket, IcmpTimeExceededCode, IcmpType};
 use crate::tracing::packet::ipv6::Ipv6Packet;
 use crate::tracing::packet::tcp::TcpPacket;
 use crate::tracing::packet::udp::UdpPacket;
 use crate::tracing::packet::IpProtocol;
 use crate::tracing::probe::{
-    Extensions, ProbeResponse, ProbeResponseData, ProbeResponseSeq, ProbeResponseSeqIcmp,
+    Extensions, Probe, ProbeResponse, ProbeResponseData, ProbeResponseSeq, ProbeResponseSeqIcmp,
     ProbeResponseSeqTcp, ProbeResponseSeqUdp,
 };
 use crate::tracing::types::{PacketSize, PayloadPattern, Sequence, TraceId};
-use crate::tracing::{MultipathStrategy, PrivilegeMode, Probe, Protocol};
+use crate::tracing::{MultipathStrategy, PrivilegeMode, Protocol};
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::SystemTime;
@@ -302,23 +302,32 @@ fn extract_probe_resp(
 ) -> TraceResult<Option<ProbeResponse>> {
     let recv = SystemTime::now();
     let ip = IpAddr::V6(src);
-    Ok(match icmp_v6.get_icmp_type() {
+    let icmp_type = icmp_v6.get_icmp_type();
+    let icmp_code = icmp_v6.get_icmp_code();
+    Ok(match icmp_type {
         IcmpType::TimeExceeded => {
-            let packet = TimeExceededPacket::new_view(icmp_v6.packet())?;
-            let (nested_ipv6, extension) = match icmp_extension_mode {
-                IcmpExtensionParseMode::Enabled => {
-                    let ipv6 = Ipv6Packet::new_view(packet.payload())?;
-                    let ext = packet.extension().map(Extensions::try_from).transpose()?;
-                    (ipv6, ext)
-                }
-                IcmpExtensionParseMode::Disabled => {
-                    let ipv6 = Ipv6Packet::new_view(packet.payload_raw())?;
-                    (ipv6, None)
-                }
-            };
-            extract_probe_resp_seq(&nested_ipv6, protocol)?.map(|resp_seq| {
-                ProbeResponse::TimeExceeded(ProbeResponseData::new(recv, ip, resp_seq), extension)
-            })
+            if IcmpTimeExceededCode::from(icmp_code) == IcmpTimeExceededCode::TtlExpired {
+                let packet = TimeExceededPacket::new_view(icmp_v6.packet())?;
+                let (nested_ipv6, extension) = match icmp_extension_mode {
+                    IcmpExtensionParseMode::Enabled => {
+                        let ipv6 = Ipv6Packet::new_view(packet.payload())?;
+                        let ext = packet.extension().map(Extensions::try_from).transpose()?;
+                        (ipv6, ext)
+                    }
+                    IcmpExtensionParseMode::Disabled => {
+                        let ipv6 = Ipv6Packet::new_view(packet.payload_raw())?;
+                        (ipv6, None)
+                    }
+                };
+                extract_probe_resp_seq(&nested_ipv6, protocol)?.map(|resp_seq| {
+                    ProbeResponse::TimeExceeded(
+                        ProbeResponseData::new(recv, ip, resp_seq),
+                        extension,
+                    )
+                })
+            } else {
+                None
+            }
         }
         IcmpType::DestinationUnreachable => {
             let packet = DestinationUnreachablePacket::new_view(icmp_v6.packet())?;
@@ -366,13 +375,19 @@ fn extract_probe_resp_seq(
         (Protocol::Udp, IpProtocol::Udp) => {
             let (src_port, dest_port, checksum) = extract_udp_packet(ipv6)?;
             Some(ProbeResponseSeq::Udp(ProbeResponseSeqUdp::new(
-                0, src_port, dest_port, checksum,
+                0,
+                IpAddr::V6(ipv6.get_destination_address()),
+                src_port,
+                dest_port,
+                checksum,
             )))
         }
         (Protocol::Tcp, IpProtocol::Tcp) => {
             let (src_port, dest_port) = extract_tcp_packet(ipv6)?;
             Some(ProbeResponseSeq::Tcp(ProbeResponseSeqTcp::new(
-                src_port, dest_port,
+                IpAddr::V6(ipv6.get_destination_address()),
+                src_port,
+                dest_port,
             )))
         }
         _ => None,
@@ -418,4 +433,94 @@ fn extract_udp_packet(ipv6: &Ipv6Packet<'_>) -> TraceResult<(u16, u16, u16)> {
 fn extract_tcp_packet(ipv6: &Ipv6Packet<'_>) -> TraceResult<(u16, u16)> {
     let tcp_packet = TcpPacket::new_view(ipv6.payload())?;
     Ok((tcp_packet.get_source(), tcp_packet.get_destination()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mocket_recv_from;
+    use crate::tracing::error::IoResult;
+    use crate::tracing::net::socket::MockSocket;
+    use crate::tracing::{Port, Round, TimeToLive};
+    use mockall::predicate;
+    use std::str::FromStr;
+
+    // Test dispatching an IPv6/ICMP probe.
+    #[test]
+    fn test_dispatch_icmp_probe_no_payload() -> anyhow::Result<()> {
+        let probe = Probe::new(
+            Sequence(33000),
+            TraceId(1234),
+            Port(0),
+            Port(0),
+            TimeToLive(10),
+            Round(0),
+            SystemTime::now(),
+        );
+        let src_addr = Ipv6Addr::from_str("fd7a:115c:a1e0:ab12:4843:cd96:6263:82a")?;
+        let dest_addr = Ipv6Addr::from_str("2a00:1450:4009:815::200e")?;
+        let packet_size = PacketSize(48);
+        let payload_pattern = PayloadPattern(0x00);
+        let expected_send_to_buf = hex_literal::hex!("80 00 77 54 04 d2 80 e8");
+        let expected_send_to_addr = SocketAddr::new(IpAddr::V6(dest_addr), 0);
+
+        let mut mocket = MockSocket::new();
+        mocket
+            .expect_send_to()
+            .with(
+                predicate::eq(expected_send_to_buf),
+                predicate::eq(expected_send_to_addr),
+            )
+            .times(1)
+            .returning(|_, _| Ok(()));
+        mocket
+            .expect_set_unicast_hops_v6()
+            .times(1)
+            .with(predicate::eq(10))
+            .returning(|_| Ok(()));
+
+        dispatch_icmp_probe(
+            &mut mocket,
+            probe,
+            src_addr,
+            dest_addr,
+            packet_size,
+            payload_pattern,
+        )?;
+        Ok(())
+    }
+
+    // This ICMPv6 packet has code 1 ("Fragment reassembly time exceeded")
+    // and must be ignored.
+    //
+    // Note this is not real packet and so the length and checksum are not
+    // accurate.
+    #[test]
+    fn test_icmp_time_exceeded_fragment_reassembly_ignored() -> anyhow::Result<()> {
+        let expected_recv_from_buf = hex_literal::hex!(
+            "
+            03 01 da 90 00 00 00 00 60 0f 02 00 00 2c 11 01
+            fd 7a 11 5c a1 e0 ab 12 48 43 cd 96 62 63 08 2a
+            2a 00 14 50 40 09 08 15 00 00 00 00 00 00 20 0e
+            95 ce 81 24 00 2c 65 f5 00 00 00 00 00 00 00 00
+            00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+            00 00 00 00 00 00 00 00 00 00 00 00
+           "
+        );
+        let expected_recv_from_addr = SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::from_str("2604:a880:ffff:6:1::41c").unwrap()),
+            0,
+        );
+        let mut mocket = MockSocket::new();
+        mocket
+            .expect_recv_from()
+            .times(1)
+            .returning(mocket_recv_from!(
+                expected_recv_from_buf,
+                expected_recv_from_addr
+            ));
+        let resp = recv_icmp_probe(&mut mocket, Protocol::Udp, IcmpExtensionParseMode::Enabled)?;
+        assert!(resp.is_none());
+        Ok(())
+    }
 }

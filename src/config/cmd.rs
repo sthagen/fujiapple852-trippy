@@ -1,8 +1,9 @@
 use crate::config::binding::TuiCommandItem;
 use crate::config::theme::TuiThemeItem;
 use crate::config::{
-    AddressMode, AsMode, DnsResolveMethodConfig, GeoIpMode, IcmpExtensionMode, LogFormat,
-    LogSpanEvents, Mode, MultipathStrategyConfig, ProtocolConfig, TuiColor, TuiKeyBinding,
+    AddressFamilyConfig, AddressMode, AsMode, DnsResolveMethodConfig, GeoIpMode, IcmpExtensionMode,
+    LogFormat, LogSpanEvents, Mode, MultipathStrategyConfig, ProtocolConfig, TuiColor,
+    TuiKeyBinding,
 };
 use anyhow::anyhow;
 use clap::builder::Styles;
@@ -60,12 +61,26 @@ pub struct Args {
     )]
     pub icmp: bool,
 
+    /// The address family [default: Ipv4thenIpv6]
+    #[arg(value_enum, short = 'F', long)]
+    pub addr_family: Option<AddressFamilyConfig>,
+
     /// Use IPv4 only
-    #[arg(short = '4', long, conflicts_with = "ipv6")]
+    #[arg(
+        short = '4',
+        long,
+        conflicts_with = "ipv6",
+        conflicts_with = "addr_family"
+    )]
     pub ipv4: bool,
 
     /// Use IPv6 only
-    #[arg(short = '6', long, conflicts_with = "ipv4")]
+    #[arg(
+        short = '6',
+        long,
+        conflicts_with = "ipv4",
+        conflicts_with = "addr_family"
+    )]
     pub ipv6: bool,
 
     /// The target port (TCP & UDP only) [default: 80]
@@ -161,7 +176,7 @@ pub struct Args {
     #[arg(value_enum, long)]
     pub tui_as_mode: Option<AsMode>,
 
-    /// Custom columns to be displayed in the TUI hops table [default: HOLSRAVBWDT]
+    /// Custom columns to be displayed in the TUI hops table [default: holsravbwdt]
     #[arg(long)]
     pub tui_custom_columns: Option<String>,
 
@@ -217,7 +232,7 @@ pub struct Args {
     #[arg(short = 'C', long)]
     pub report_cycles: Option<usize>,
 
-    /// The MaxMind City GeoLite2 mmdb file
+    /// The supported MaxMind or IPinfo GeoIp mmdb file
     #[arg(short = 'G', long, value_hint = clap::ValueHint::FilePath)]
     pub geoip_mmdb_file: Option<String>,
 
@@ -225,7 +240,7 @@ pub struct Args {
     #[arg(long)]
     pub generate: Option<Shell>,
 
-    /// Print a template toml config file and exit.
+    /// Print a template toml config file and exit
     #[arg(long)]
     pub print_config_template: bool,
 
